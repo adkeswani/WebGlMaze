@@ -26,18 +26,16 @@ var mazeVertexShaderScript = `#version 300 es
     }
 `;
 
-// Is it better to fill in all of the walls and then subtract?
-// Or to start empty, then fill in some walls, then fill in some more?
-// The former sounds more sensible
-
 var maze;
-var ROWS = 100;
-var COLUMNS = 100;
+//var ROWS = 100;
+var ROWS = 20;
+var COLUMNS = ROWS;
 var RIGHT = 0;
 var DOWN = 1;
 var LEFT = 2;
 var UP = 3;
 var MAX_DIRECTION = UP;
+var MAX_LENGTH = ROWS / 10;
 function createEmptyMaze()
 {
     maze = [];
@@ -59,31 +57,31 @@ function createRandomPath(from, to)
     var curr = from;
     while ((curr[0] != to[0]) || (curr[1] != to[1]))
     {
-        console.log(curr);
+        //console.log(curr);
 
         var direction = Math.floor(Math.random() * (MAX_DIRECTION + 1));
-        var length = Math.floor(Math.random() * 10);
+        var length = Math.floor(Math.random() * MAX_LENGTH);
 
         for (var currLength = 0; currLength < length; currLength++)
         {
             if ((direction == UP) && (curr[1] != 0))
             {
                 curr[1] -= 1;
-                ((maze[curr[0]])[curr[1]])[DOWN] = false;
+                maze[curr[0]][curr[1]][DOWN] = false;
             }
             else if ((direction == LEFT) && (curr[0] != 0))
             {
                 curr[0] -= 1;
-                ((maze[curr[0]])[curr[1]])[RIGHT] = false;
+                maze[curr[0]][curr[1]][RIGHT] = false;
             }
             else if ((direction == RIGHT) && (curr[0] != (COLUMNS - 1)))
             {
-                ((maze[curr[0]])[curr[1]])[RIGHT] = false;
+                maze[curr[0]][curr[1]][RIGHT] = false;
                 curr[0] += 1;
             }
             else if ((direction == DOWN) && (curr[1] != (ROWS - 1)))
             {
-                ((maze[curr[0]])[curr[1]])[DOWN] = false;
+                maze[curr[0]][curr[1]][DOWN] = false;
                 curr[1] += 1;
             }
             else
@@ -94,20 +92,20 @@ function createRandomPath(from, to)
     }
 }
 
-var vertices = [];
+var mazeVertices = [];
 var MARGIN_X = 50;
 var MARGIN_Y = 50;
 var START_X = MARGIN_X / 2;
 var START_Y = MARGIN_Y / 2;
 function convertMazeToVertices()
 {
-    vertices = [];
+    mazeVertices = [];
 
     // Draw left and top walls
-    vertices.push(START_X, START_Y);
-    vertices.push(START_X + gl.viewportWidth - MARGIN_X, START_Y);
-    vertices.push(START_X, START_Y);
-    vertices.push(START_X, START_Y + gl.viewportHeight - MARGIN_Y);
+    mazeVertices.push(START_X, START_Y);
+    mazeVertices.push(START_X + gl.viewportWidth - MARGIN_X, START_Y);
+    mazeVertices.push(START_X, START_Y);
+    mazeVertices.push(START_X, START_Y + gl.viewportHeight - MARGIN_Y);
 
     var cellWidth = (gl.viewportWidth - MARGIN_X) / COLUMNS;
     var cellHeight = (gl.viewportHeight - MARGIN_Y) / ROWS;
@@ -117,7 +115,7 @@ function convertMazeToVertices()
         {
             if (maze[i][j][RIGHT])
             {
-                vertices.push(
+                mazeVertices.push(
                     START_X + cellWidth * (i + 1), START_Y + cellHeight * j,
                     START_X + cellWidth * (i + 1), START_Y + cellHeight * (j + 1)
                 );
@@ -125,7 +123,7 @@ function convertMazeToVertices()
 
             if (maze[i][j][DOWN])
             {
-                vertices.push(
+                mazeVertices.push(
                     START_X + cellWidth * i, START_Y + cellHeight * (j + 1),
                     START_X + cellWidth * (i + 1), START_Y + cellHeight * (j + 1)
                 );
@@ -135,7 +133,6 @@ function convertMazeToVertices()
 }
 
 var mazeVertexArrayObject;
-var lastTime = 0;
 var projectionMatrix = glMatrix.mat4.create();
 var modelViewMatrix = glMatrix.mat4.create();
 
@@ -174,7 +171,7 @@ function initBuffers()
     gl.vertexAttribPointer(mazeProgram.a_position, size, type, normalize, stride, offset);
 }
 
-function drawScene() 
+function drawScene()
 {
     gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -182,30 +179,124 @@ function drawScene()
     gl.useProgram(mazeProgram);
     sendNewMatrices(mazeProgram, projectionMatrix, modelViewMatrix);
 
-    createEmptyMaze();
-    createRandomPath([0, 0], [COLUMNS - 1, ROWS - 1]);
-    convertMazeToVertices();
     sendNewColor(mazeProgram, [1.0, 1.0, 1.0, 1.0]);
-
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mazeVertices), gl.STATIC_DRAW);
     var offset = 0;
-    gl.drawArrays(gl.LINES, offset, vertices.length);
+    gl.drawArrays(gl.LINES, offset, mazeVertices.length);
+
+    sendNewColor(mazeProgram, [0.0, 1.0, 0.0, 1.0]);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(solveVertices), gl.STATIC_DRAW);
+    var offset = 0;
+    gl.drawArrays(gl.LINES, offset, solveVertices.length);
 }
 
-/*
-function tick(now)
+var solveVertices = [];
+var visited = [];
+var next = [];
+var target = [COLUMNS - 1, ROWS - 1];
+function nextSolveStep()
 {
-    drawScene();
-    if (lastTime != 0) 
+    if (next.length == 0)
     {
-        var elapsed = now - lastTime;
+        var first = {
+            path: [],
+            pathEnd: [0, 0]
+        }
+
+        next.push(first);
     }
 
-    lastTime = now;
+    // Pop and shift are for DFS and BFS respectively! :)
+    if ((next[next.length - 1].pathEnd[0] != target[0]) || (next[next.length - 1].pathEnd[1] != target[1]))
+    {
+        var curr = next.pop(); 
+        visited.push(curr.pathEnd);
+
+        if ((curr.pathEnd[0] != COLUMNS - 1) && 
+            !maze[curr.pathEnd[0]][curr.pathEnd[1]][RIGHT] && 
+            !visited.some((v) => (v[0] == curr.pathEnd[0] + 1) && (v[1] == curr.pathEnd[1])))
+        {
+            var newNext = {
+                path: [...curr.path],
+                pathEnd: []
+            }
+
+            newNext.path.push(curr.pathEnd);
+            newNext.pathEnd = [curr.pathEnd[0] + 1, curr.pathEnd[1]];
+            next.push(newNext);
+        }
+
+        if ((curr.pathEnd[1] != ROWS - 1) && 
+            !maze[curr.pathEnd[0]][curr.pathEnd[1]][DOWN] &&
+            !visited.some((v) => (v[0] == curr.pathEnd[0]) && (v[1] == curr.pathEnd[1] + 1)))
+        {
+            var newNext = {
+                path: [...curr.path],
+                pathEnd: []
+            }
+
+            newNext.path.push(curr.pathEnd);
+            newNext.pathEnd = [curr.pathEnd[0], curr.pathEnd[1] + 1];
+            next.push(newNext);
+        }
+
+        if ((curr.pathEnd[0] != 0) && 
+            !maze[curr.pathEnd[0] - 1][curr.pathEnd[1]][RIGHT] &&
+            !visited.some((v) => (v[0] == curr.pathEnd[0] - 1) && (v[1] == curr.pathEnd[1])))
+        {
+            var newNext = {
+                path: [...curr.path],
+                pathEnd: []
+            }
+
+            newNext.path.push(curr.pathEnd);
+            newNext.pathEnd = [curr.pathEnd[0] - 1, curr.pathEnd[1]];
+            next.push(newNext);
+        }
+
+        if ((curr.pathEnd[1] != 0) && 
+            !maze[curr.pathEnd[0]][curr.pathEnd[1] - 1][DOWN] &&
+            !visited.some((v) => (v[0] == curr.pathEnd[0]) && (v[1] == curr.pathEnd[1] - 1)))
+        {
+            var newNext = {
+                path: [...curr.path],
+                pathEnd: []
+            }
+
+            newNext.path.push(curr.pathEnd);
+            newNext.pathEnd = [curr.pathEnd[0], curr.pathEnd[1] - 1];
+            next.push(newNext);
+        }
+    }
+
+    solveVertices = [];
+    var cellWidth = (gl.viewportWidth - MARGIN_X) / COLUMNS;
+    var cellHeight = (gl.viewportHeight - MARGIN_Y) / ROWS;
+    curr.path.forEach(p => solveVertices.push(
+        START_X + cellWidth / 2 + p[0] * cellWidth, 
+        START_Y + cellHeight / 2 + p[1] * cellHeight,
+        START_X + cellWidth / 2 + p[0] * cellWidth, 
+        START_Y + cellHeight / 2 + p[1] * cellHeight
+    ));
+
+    solveVertices.shift();
+    solveVertices.shift();
+}
+
+var lastSolveTime = 0;
+var SOLVE_STEP_IN_MS = 50;
+function tick(now)
+{
+    var elapsedSinceLastSolve = now - lastSolveTime;
+    if (elapsedSinceLastSolve > SOLVE_STEP_IN_MS)
+    {
+        nextSolveStep();
+        lastSolveTime = now;
+    }
+
+    drawScene();
     requestAnimationFrame(tick);
 }
-*/
 
 function mazeStart() 
 {
@@ -222,5 +313,9 @@ function mazeStart()
 
     initBuffers();
 
-    drawScene();
+    createEmptyMaze();
+    createRandomPath([0, 0], [COLUMNS - 1, ROWS - 1]);
+    convertMazeToVertices();
+
+    tick(0);
 }
