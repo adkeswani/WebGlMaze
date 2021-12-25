@@ -31,8 +31,8 @@ var mazeVertexShaderScript = `#version 300 es
 // The former sounds more sensible
 
 var maze;
-var ROWS = 10;
-var COLUMNS = 10;
+var ROWS = 100;
+var COLUMNS = 100;
 var RIGHT = 0;
 var DOWN = 1;
 var LEFT = 2;
@@ -61,31 +61,35 @@ function createRandomPath(from, to)
     {
         console.log(curr);
 
-        var direction = Math.floor(Math.random() * (DOWN + 1));
+        var direction = Math.floor(Math.random() * (MAX_DIRECTION + 1));
+        var length = Math.floor(Math.random() * 10);
 
-        if ((direction == UP) && (curr[1] != 0))
+        for (var currLength = 0; currLength < length; currLength++)
         {
-            curr[1] -= 1;
-            ((maze[curr[0]])[curr[1]])[DOWN] = false;
-        }
-        else if ((direction == LEFT) && (curr[0] != 0))
-        {
-            curr[0] -= 1;
-            ((maze[curr[0]])[curr[1]])[RIGHT] = false;
-        }
-        else if ((direction == RIGHT) && (curr[0] != (COLUMNS - 1)))
-        {
-            ((maze[curr[0]])[curr[1]])[RIGHT] = false;
-            curr[0] += 1;
-        }
-        else if ((direction == DOWN) && (curr[1] != (ROWS - 1)))
-        {
-            ((maze[curr[0]])[curr[1]])[DOWN] = false;
-            curr[1] += 1;
-        }
-        else
-        {
-            continue;
+            if ((direction == UP) && (curr[1] != 0))
+            {
+                curr[1] -= 1;
+                ((maze[curr[0]])[curr[1]])[DOWN] = false;
+            }
+            else if ((direction == LEFT) && (curr[0] != 0))
+            {
+                curr[0] -= 1;
+                ((maze[curr[0]])[curr[1]])[RIGHT] = false;
+            }
+            else if ((direction == RIGHT) && (curr[0] != (COLUMNS - 1)))
+            {
+                ((maze[curr[0]])[curr[1]])[RIGHT] = false;
+                curr[0] += 1;
+            }
+            else if ((direction == DOWN) && (curr[1] != (ROWS - 1)))
+            {
+                ((maze[curr[0]])[curr[1]])[DOWN] = false;
+                curr[1] += 1;
+            }
+            else
+            {
+                continue;
+            }
         }
     }
 }
@@ -97,6 +101,14 @@ var START_X = MARGIN_X / 2;
 var START_Y = MARGIN_Y / 2;
 function convertMazeToVertices()
 {
+    vertices = [];
+
+    // Draw left and top walls
+    vertices.push(START_X, START_Y);
+    vertices.push(START_X + gl.viewportWidth - MARGIN_X, START_Y);
+    vertices.push(START_X, START_Y);
+    vertices.push(START_X, START_Y + gl.viewportHeight - MARGIN_Y);
+
     var cellWidth = (gl.viewportWidth - MARGIN_X) / COLUMNS;
     var cellHeight = (gl.viewportHeight - MARGIN_Y) / ROWS;
     for (var i = 0; i < COLUMNS; i++)
