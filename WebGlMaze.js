@@ -3,26 +3,30 @@ var mazeFragmentShaderScript = `#version 300 es
 
     precision highp float;
 
-    uniform vec4 u_color;
+    in vec4 v_color;
 
     out vec4 out_color;
 
     void main(void) 
     {
-        out_color = u_color;
+        out_color = v_color;
     }
 `;
 
 var mazeVertexShaderScript = `#version 300 es
 
     in vec2 a_position; 
+    in vec4 a_color;
 
     uniform mat4 u_projectionMatrix;
     uniform mat4 u_modelViewMatrix;
 
+    out vec4 v_color;
+
     void main(void) 
     {
         gl_Position = u_projectionMatrix * u_modelViewMatrix * vec4(a_position, 0.0, 1.0);
+        v_color = a_color;
     }
 `;
 
@@ -93,6 +97,7 @@ function createRandomPath(from, to)
 }
 
 var mazeVertices = [];
+var mazeColors = [];
 var MARGIN_X = 50;
 var MARGIN_Y = 50;
 var START_X = MARGIN_X / 2;
@@ -130,6 +135,14 @@ function convertMazeToVertices()
             }
         }
     }
+
+    mazeColors = Array(mazeVertices.length).fill(1.0, 1.0, 1.0, 1.0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mazeVertices), gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mazeColors), gl.STATIC_DRAW);
 }
 
 var mazeVertexArrayObject;
@@ -142,36 +155,23 @@ function initMatrices()
     glMatrix.mat4.identity(modelViewMatrix);
 }
 
+var vertexBuffer;
+var colorBuffer;
 function initBuffers()
 {
-    // Create buffer on GPU
-    var vertexBuffer = gl.createBuffer();
+    vertexBuffer = gl.createBuffer();
+    colorBuffer = gl.createBuffer();
 
-    // Say that we're going to use that buffer as the ARRAY_BUFFER
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-
-    // Tell attribute how to get data from buffer
-    // Create a vertex array object (array of attribute state)
     mazeVertexArrayObject = gl.createVertexArray();
-
-    // Make it the current vertex array
     gl.bindVertexArray(mazeVertexArrayObject);
 
-    // Turn on the attribute, without this the attribute will be a constant
-    // Tell it we're going to be putting stuff from buffer into it.
-    gl.enableVertexAttribArray(mazeProgram.a_position);
-
-    // How to get data out of the buffer, and bind ARRAY_BUFFER to the attribute
-    // Attribute will receive data from that ARRAY_BUFFER
-    var size = 2;
-    var type = gl.FLOAT;
-    var normalize = false;
-    var stride = 0;
-    var offset = 0;
-    gl.vertexAttribPointer(mazeProgram.a_position, size, type, normalize, stride, offset);
+    solves.forEach(s => {
+        s.vertexBuffer = gl.createBuffer();
+        s.colorBuffer = gl.createBuffer();
+    });
 }
 
-function drawScene()
+function drawScene(allSolveVerticesAndColors)
 {
     gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -179,122 +179,265 @@ function drawScene()
     gl.useProgram(mazeProgram);
     sendNewMatrices(mazeProgram, projectionMatrix, modelViewMatrix);
 
-    sendNewColor(mazeProgram, [1.0, 1.0, 1.0, 1.0]);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mazeVertices), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.enableVertexAttribArray(mazeProgram.a_position);
+    var size = 2;
+    var type = gl.FLOAT;
+    var normalize = false;
+    var stride = 0;
     var offset = 0;
-    gl.drawArrays(gl.LINES, offset, mazeVertices.length);
+    gl.vertexAttribPointer(mazeProgram.a_position, size, type, normalize, stride, offset);
 
-    sendNewColor(mazeProgram, [0.0, 1.0, 0.0, 1.0]);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(solveVertices), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    gl.enableVertexAttribArray(mazeProgram.a_color);
+    gl.enableVertexAttribArray(mazeProgram.a_color);
+    var size = 4;
+    var type = gl.FLOAT;
+    var normalize = false;
+    var stride = 0;
     var offset = 0;
-    gl.drawArrays(gl.LINES, offset, solveVertices.length);
+    gl.vertexAttribPointer(mazeProgram.a_color, size, type, normalize, stride, offset);
+
+    var offset = 0;
+    gl.drawArrays(gl.LINES, offset, mazeVertices.length / 2);
+
+    allSolveVerticesAndColors.forEach(s =>
+    {
+        gl.bindBuffer(gl.ARRAY_BUFFER, s.vertexBuffer);
+        gl.enableVertexAttribArray(mazeProgram.a_position);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(s.vertices), gl.STATIC_DRAW);
+        var size = 2;
+        var type = gl.FLOAT;
+        var normalize = false;
+        var stride = 0;
+        var offset = 0;
+        gl.vertexAttribPointer(mazeProgram.a_position, size, type, normalize, stride, offset);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, s.colorBuffer);
+        gl.enableVertexAttribArray(mazeProgram.a_color);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(s.colors), gl.STATIC_DRAW);
+        var size = 4;
+        var type = gl.FLOAT;
+        var normalize = false;
+        var stride = 0;
+        var offset = 0;
+        gl.vertexAttribPointer(mazeProgram.a_color, size, type, normalize, stride, offset);
+
+        gl.drawArrays(gl.LINES, offset, s.vertices.length / 2); // Number of vertices, not number of elements!!!!
+    });
 }
 
-var solveVertices = [];
-var visited = [];
-var next = [];
-var target = [COLUMNS - 1, ROWS - 1];
-function nextSolveStep()
+var DFS = 0;
+var BFS = 1;
+var ASTAR = 2;
+var GREEDY = 3;
+
+var TARGET = [COLUMNS - 1, ROWS - 1];
+
+function getNextToVisitIndex(solve)
 {
-    if (next.length == 0)
+    var nextToVisitIndex = 0;
+    switch (solve.algorithm)
+    {
+        case DFS:
+            nextToVisitIndex = solve.toVisit.length - 1;
+            break;
+        case BFS:
+            nextToVisitIndex = 0;
+            break;
+        case ASTAR:
+        case GREEDY:
+            var minCost = Number.MAX_VALUE;
+            for (var i = 0; i < solve.toVisit.length; i++)
+            {
+                cost = (TARGET[0] - solve.toVisit[i].pathEnd[0]) + (TARGET[1] - solve.toVisit[i].pathEnd[1]);
+                if (solve.algorithm == ASTAR)
+                {
+                    cost += solve.toVisit[i].path.length;
+                }
+
+                if (cost < minCost)
+                {
+                    nextToVisitIndex = i;
+                    minCost = cost;
+                }
+            }
+
+            break;
+    }
+
+    return nextToVisitIndex;
+}
+
+function nextSolveStep(solve)
+{
+    if (solve.toVisit.length == 0)
     {
         var first = {
             path: [],
             pathEnd: [0, 0]
         }
 
-        next.push(first);
+        solve.toVisit.push(first);
+        solve.visited.push(first.pathEnd);
     }
 
-    // Pop and shift are for DFS and BFS respectively! :)
-    if ((next[next.length - 1].pathEnd[0] != target[0]) || (next[next.length - 1].pathEnd[1] != target[1]))
+    var nextToVisitIndex = getNextToVisitIndex(solve);
+    if ((solve.toVisit[nextToVisitIndex].pathEnd[0] != TARGET[0]) || (solve.toVisit[nextToVisitIndex].pathEnd[1] != TARGET[1]))
     {
-        var curr = next.pop(); 
-        visited.push(curr.pathEnd);
-
+        solve.steps += 1;
+        var curr = solve.toVisit[nextToVisitIndex];
+        solve.toVisit.splice(nextToVisitIndex, 1);
         if ((curr.pathEnd[0] != COLUMNS - 1) && 
             !maze[curr.pathEnd[0]][curr.pathEnd[1]][RIGHT] && 
-            !visited.some((v) => (v[0] == curr.pathEnd[0] + 1) && (v[1] == curr.pathEnd[1])))
+            !solve.visited.some((v) => (v[0] == curr.pathEnd[0] + 1) && (v[1] == curr.pathEnd[1])))
         {
             var newNext = {
-                path: [...curr.path],
-                pathEnd: []
-            }
+                path: [...curr.path, curr.pathEnd],
+                pathEnd: [curr.pathEnd[0] + 1, curr.pathEnd[1]]
+            };
 
-            newNext.path.push(curr.pathEnd);
-            newNext.pathEnd = [curr.pathEnd[0] + 1, curr.pathEnd[1]];
-            next.push(newNext);
+            solve.toVisit.push(newNext);
+            solve.visited.push(newNext.pathEnd);
         }
 
         if ((curr.pathEnd[1] != ROWS - 1) && 
             !maze[curr.pathEnd[0]][curr.pathEnd[1]][DOWN] &&
-            !visited.some((v) => (v[0] == curr.pathEnd[0]) && (v[1] == curr.pathEnd[1] + 1)))
+            !solve.visited.some((v) => (v[0] == curr.pathEnd[0]) && (v[1] == curr.pathEnd[1] + 1)))
         {
             var newNext = {
-                path: [...curr.path],
-                pathEnd: []
-            }
+                path: [...curr.path, curr.pathEnd],
+                pathEnd: [curr.pathEnd[0], curr.pathEnd[1] + 1]
+            };
 
-            newNext.path.push(curr.pathEnd);
-            newNext.pathEnd = [curr.pathEnd[0], curr.pathEnd[1] + 1];
-            next.push(newNext);
+            solve.toVisit.push(newNext);
+            solve.visited.push(newNext.pathEnd);
         }
 
         if ((curr.pathEnd[0] != 0) && 
             !maze[curr.pathEnd[0] - 1][curr.pathEnd[1]][RIGHT] &&
-            !visited.some((v) => (v[0] == curr.pathEnd[0] - 1) && (v[1] == curr.pathEnd[1])))
+            !solve.visited.some((v) => (v[0] == curr.pathEnd[0] - 1) && (v[1] == curr.pathEnd[1])))
         {
             var newNext = {
-                path: [...curr.path],
-                pathEnd: []
-            }
+                path: [...curr.path, curr.pathEnd],
+                pathEnd: [curr.pathEnd[0] - 1, curr.pathEnd[1]]
+            };
 
-            newNext.path.push(curr.pathEnd);
-            newNext.pathEnd = [curr.pathEnd[0] - 1, curr.pathEnd[1]];
-            next.push(newNext);
+            solve.toVisit.push(newNext);
+            solve.visited.push(newNext.pathEnd);
         }
 
         if ((curr.pathEnd[1] != 0) && 
             !maze[curr.pathEnd[0]][curr.pathEnd[1] - 1][DOWN] &&
-            !visited.some((v) => (v[0] == curr.pathEnd[0]) && (v[1] == curr.pathEnd[1] - 1)))
+            !solve.visited.some((v) => (v[0] == curr.pathEnd[0]) && (v[1] == curr.pathEnd[1] - 1)))
         {
             var newNext = {
-                path: [...curr.path],
-                pathEnd: []
-            }
+                path: [...curr.path, curr.pathEnd],
+                pathEnd: [curr.pathEnd[0], curr.pathEnd[1] - 1]
+            };
 
-            newNext.path.push(curr.pathEnd);
-            newNext.pathEnd = [curr.pathEnd[0], curr.pathEnd[1] - 1];
-            next.push(newNext);
+            solve.toVisit.push(newNext);
+            solve.visited.push(newNext.pathEnd);
         }
     }
+    else if (!solve.solved)
+    {
+        solve.solved = true;
+        console.log(`Algorithm ${solve.algorithm} steps: ${solve.steps}, cost: ${solve.toVisit[nextToVisitIndex].path.length + 1}`);
+    }
 
-    solveVertices = [];
+    nextToVisitIndex = getNextToVisitIndex(solve);
+    solve.vertices = [];
     var cellWidth = (gl.viewportWidth - MARGIN_X) / COLUMNS;
     var cellHeight = (gl.viewportHeight - MARGIN_Y) / ROWS;
-    curr.path.forEach(p => solveVertices.push(
+    solve.toVisit[nextToVisitIndex].path.forEach(p => solve.vertices.push(
         START_X + cellWidth / 2 + p[0] * cellWidth, 
         START_Y + cellHeight / 2 + p[1] * cellHeight,
         START_X + cellWidth / 2 + p[0] * cellWidth, 
         START_Y + cellHeight / 2 + p[1] * cellHeight
     ));
 
-    solveVertices.shift();
-    solveVertices.shift();
+    solve.vertices.shift();
+    solve.vertices.shift();
+
+    solve.vertices.push(
+        START_X + cellWidth / 2 + solve.toVisit[nextToVisitIndex].pathEnd[0] * cellWidth, 
+        START_Y + cellHeight / 2 + solve.toVisit[nextToVisitIndex].pathEnd[1] * cellHeight
+    );
+
+    for (var i = 0; i < solve.vertices.length / 2; i++)
+    {
+        solve.colors.push(...solve.COLOR);
+    }
 }
 
 var lastSolveTime = 0;
-var SOLVE_STEP_IN_MS = 50;
+var SOLVE_STEP_IN_MS = 5;
+
+var bfsSolve = {
+    vertices: [],
+    visited: [],
+    toVisit: [],
+    colors: [],
+    COLOR: [0.0, 1.0, 0.0, 1.0],
+    colorBuffer: null,
+    vertexBuffer: null,
+    solved: false,
+    algorithm: BFS,
+    steps: 0
+};
+
+var dfsSolve = {
+    vertices: [],
+    visited: [],
+    toVisit: [],
+    colors: [],
+    COLOR: [1.0, 0.0, 0.0, 1.0],
+    colorBuffer: null,
+    vertexBuffer: null,
+    solved: false,
+    algorithm: DFS,
+    steps: 0
+};
+
+var astarSolve = {
+    vertices: [],
+    visited: [],
+    toVisit: [],
+    colors: [],
+    COLOR: [0.0, 1.0, 1.0, 1.0],
+    colorBuffer: null,
+    vertexBuffer: null,
+    solved: false,
+    algorithm: ASTAR,
+    steps: 0
+};
+
+var greedySolve = {
+    vertices: [],
+    visited: [],
+    toVisit: [],
+    colors: [],
+    COLOR: [1.0, 0.0, 1.0, 1.0],
+    colorBuffer: null,
+    vertexBuffer: null,
+    solved: false,
+    algorithm: GREEDY,
+    steps: 0
+};
+
+var solves = [bfsSolve, dfsSolve, astarSolve, greedySolve];
+
 function tick(now)
 {
-    var elapsedSinceLastSolve = now - lastSolveTime;
-    if (elapsedSinceLastSolve > SOLVE_STEP_IN_MS)
-    {
-        nextSolveStep();
-        lastSolveTime = now;
-    }
+    //var elapsedSinceLastSolve = now - lastSolveTime;
+    //if (elapsedSinceLastSolve > SOLVE_STEP_IN_MS)
+    //{
+    solves.forEach(s => nextSolveStep(s));
+    //    lastSolveTime = now;
+    //}
 
-    drawScene();
+    drawScene(solves);
     requestAnimationFrame(tick);
 }
 
@@ -311,11 +454,11 @@ function mazeStart()
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.enable(gl.DEPTH_TEST);
 
-    initBuffers();
+    initBuffers(solves);
 
     createEmptyMaze();
     createRandomPath([0, 0], [COLUMNS - 1, ROWS - 1]);
     convertMazeToVertices();
 
-    tick(0);
+    tick();
 }
