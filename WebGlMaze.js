@@ -31,15 +31,14 @@ var mazeVertexShaderScript = `#version 300 es
 `;
 
 var maze;
-//var ROWS = 100;
-var ROWS = 20;
+var ROWS = 50;
 var COLUMNS = ROWS;
 var RIGHT = 0;
 var DOWN = 1;
 var LEFT = 2;
 var UP = 3;
 var MAX_DIRECTION = UP;
-var MAX_LENGTH = ROWS / 10;
+var MAX_LENGTH = ROWS / 5;
 function createEmptyMaze()
 {
     maze = [];
@@ -250,7 +249,11 @@ function getNextToVisitIndex(solve)
             var minCost = Number.MAX_VALUE;
             for (var i = 0; i < solve.toVisit.length; i++)
             {
-                cost = (TARGET[0] - solve.toVisit[i].pathEnd[0]) + (TARGET[1] - solve.toVisit[i].pathEnd[1]);
+                //var cost = (TARGET[0] - solve.toVisit[i].pathEnd[0]) + (TARGET[1] - solve.toVisit[i].pathEnd[1]);
+                var cost = glMatrix.vec2.distance(
+                    glMatrix.vec2.fromValues(TARGET[0], TARGET[1]), 
+                    glMatrix.vec2.fromValues(solve.toVisit[i].pathEnd[0], solve.toVisit[i].pathEnd[1]));
+
                 if (solve.algorithm == ASTAR)
                 {
                     cost += solve.toVisit[i].path.length;
@@ -365,6 +368,7 @@ function nextSolveStep(solve)
         START_Y + cellHeight / 2 + solve.toVisit[nextToVisitIndex].pathEnd[1] * cellHeight
     );
 
+    solve.colors = [];
     for (var i = 0; i < solve.vertices.length / 2; i++)
     {
         solve.colors.push(...solve.COLOR);
